@@ -314,7 +314,7 @@ def main(argv):
   do_extract = True
   while i < len(argv):
     arg = argv[i]
-    if not arg.startswith('-'):
+    if not arg.startswith('-') or arg == '-':
       break
     i += 1
     if arg == '--':
@@ -334,12 +334,16 @@ def main(argv):
   else:
     only_filenames = argv[i:]
 
-  f = open(archive_filename, 'rb')
-  try:
-    scan_zip(UnreadableFile(f),
+  if archive_filename == '-':
+    scan_zip(UnreadableFile(sys.stdin),
              do_extract=do_extract, only_filenames=only_filenames)
-  finally:
-    f.close()
+  else:
+    f = open(archive_filename, 'rb')
+    try:
+      scan_zip(UnreadableFile(f),
+               do_extract=do_extract, only_filenames=only_filenames)
+    finally:
+      f.close()
 
 
 if __name__ == '__main__':

@@ -9,4 +9,9 @@ Please note that as an alternative of unzip_scan.py, the 7z tool can also be
 used to display (`7z l archive.zip') and extract (`7z x archive.zip')
 truncated ZIP archive files.
 
+unzip_scan.py can also be used to extract a ZIP archive file on stdin,
+without seeking. Example command (run it without the leading `$'):
+
+  $ cat archive.zip | python unzip_scan.py -
+
 __END__
