@@ -130,6 +130,7 @@ def scan_zip(f, do_extract=False, only_filenames=None):  # Extracts the .iso fro
   # !! Support ZIP64.
 
   def is_filename_matching(filename):
+    # !! Match and extract directories recursively.
     return only_filenames is None or filename in only_filenames
 
   while 1:
