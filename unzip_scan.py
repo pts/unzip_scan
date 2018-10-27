@@ -196,6 +196,7 @@ def scan_zip(f, do_extract=False, only_filenames=None):  # Extracts the .iso fro
       assert crc32 in (0, None)
       assert compressed_size in (0, None)
       assert uncompressed_size in (0, None)
+    is_matching = is_filename_matching(filename)
     info = {}
     info['f'] = filename
     if is_dir:
@@ -214,15 +215,16 @@ def scan_zip(f, do_extract=False, only_filenames=None):  # Extracts the .iso fro
       has_printed = False
     else:
       has_printed = True
-      sys.stdout.write(format_info(info))
-      sys.stdout.flush()
+      if is_matching:
+        sys.stdout.write(format_info(info))
+        sys.stdout.flush()
     # !! How are directories represented in the .zip file?
     # !! Add efficient f.seek(..., 1) calls to skip bytes.
     uf = None
     #print [[filename, mtime, uncompressed_size]]
     assert method in (0, 8)
     try:
-      if do_extract and not is_dir and is_filename_matching(filename):
+      if do_extract and not is_dir and is_matching:
         uf = open(filename, 'wb')
       else:
         uf = None
@@ -290,7 +292,7 @@ def scan_zip(f, do_extract=False, only_filenames=None):  # Extracts the .iso fro
         if not os.path.isdir(filename):
           raise
       os.utime(filename, (atime, mtime))
-    if not has_printed:
+    if is_matching and not has_printed:
       if not is_dir:
         info['size'] = uncompressed_size
       info['compressed_size'] = compressed_size
