@@ -225,6 +225,11 @@ def scan_zip(f, do_extract=False, only_filenames=None):  # Extracts the .iso fro
     assert method in (0, 8)
     try:
       if do_extract and not is_dir and is_matching:
+        ni = filename.rfind('/')
+        if ni >= 0:
+          dirname = filename[:ni]
+          if not os.path.isdir(dirname):
+            os.makedirs(dirname)
         uf = open(filename, 'wb')
       else:
         uf = None
