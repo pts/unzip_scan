@@ -14,4 +14,8 @@ without seeking. Example command (run it without the leading `$'):
 
   $ cat archive.zip | python unzip_scan.py -
 
+unzip_scan.py is alpha quality software: error messages are not helpful
+(mostly they are Python AssertionError dumps), and not all ZIP features are
+supported or detected.
+
 __END__
