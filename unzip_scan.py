@@ -223,6 +223,7 @@ def scan_zip(f, do_extract=False, only_filenames=None):  # Extracts the .iso fro
     uf = None
     #print [[filename, mtime, uncompressed_size]]
     assert method in (0, 8)
+    is_ok = False
     try:
       if do_extract and not is_dir and is_matching:
         ni = filename.rfind('/')
@@ -281,10 +282,23 @@ def scan_zip(f, do_extract=False, only_filenames=None):  # Extracts the .iso fro
         if uf and method == 8:
           uf.write(zd.flush())
       zd = None  # Save memory.
+      is_ok = True
     finally:
       if uf:
         uf.close()
-        os.utime(filename, (atime, mtime))
+        if is_ok:
+          os.utime(filename, (atime, mtime))
+        else:
+          filename2 = filename + '.partial'
+          try:
+            os.rename(filename, filename2)
+            is_rename_ok = True
+          except OSError:
+            is_rename_ok = False
+          if is_rename_ok:
+            print >>sys.stderr, 'warning: renamed partially extracted %r to %r' % (filename, filename2)
+          else:
+            print >>sys.stderr, 'warning: failed to rename partially extracted %r to %r' % (filename, filename2)
       uf = None  # Save memory.
     if is_dir:
       assert crc32 == 0
