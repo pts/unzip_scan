@@ -140,6 +140,7 @@ def scan_zip(f, do_extract=False, only_filenames=None):  # Extracts the .iso fro
     assert data[:4] == 'PK\3\4', repr(data)
     data = f.read(26)  # Local file header.
     assert len(data) == 26
+    # crc32 is of the uncompressed, decrypted file.
     (version, flags, method, mtime_time, mtime_date, crc32, compressed_size,
      uncompressed_size, filename_size, extra_field_size,
     ) = struct.unpack('<HHHHHlLLHH', data)
