@@ -206,6 +206,9 @@ def scan_zip(f, do_extract=False, only_filenames=None):  # Extracts the .iso fro
     else:
       info['size'] = uncompressed_size
       info['compressed_size'] = compressed_size
+      if flags & 1:
+        info['compressed_size'] -= 12
+        info['is_encrypted'] = 1
       info['crc32'] = crc32
     info['mtime'] = mtime
     info['atime'] = atime
@@ -219,6 +222,14 @@ def scan_zip(f, do_extract=False, only_filenames=None):  # Extracts the .iso fro
       if is_matching:
         sys.stdout.write(format_info(info))
         sys.stdout.flush()
+
+    if flags & 1:  # Encryption header.
+      assert compressed_size >= 12
+      data = f.read(12)
+      assert len(data) == 12
+      print 'ENCRYPTION_HEADER %r' % data
+      compressed_size -= 12
+
     # !! Add efficient f.seek(..., 1) calls to skip bytes.
     uf = None
     #print [[filename, mtime, uncompressed_size]]
