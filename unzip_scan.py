@@ -281,10 +281,11 @@ def scan_zip(f, do_extract=False, only_filenames=None):  # Extracts the .iso fro
           j = min(65536, compressed_size - i)
           data = f.read(j)
           assert len(data) == j
-          #print 'DATA %d %r' % (len(data), data)
+          #print 'COMPRESSED_DATA size=%d %r' % (len(data), data)
           i += j
           if method == 8:
             data = zd.decompress(data)
+          #print 'UNCOMPRESSED_DATA size=%d %r' % (len(data), data)
           uci += len(data)
           assert uci <= uncompressed_size
           if uf:
