@@ -136,7 +136,7 @@ def scan_zip(f, do_extract=False, only_filenames=None):  # Extracts the .iso fro
 
   while 1:
     data = f.read(4)
-    if data[:3] in ('PK\1', 'PK\5', 'PK\6'):
+    if data[:3] in ('PK\1', 'PK\5', 'PK\6', 'PK\7'):
       break
     assert data[:4] == 'PK\3\4', repr(data)
     data = f.read(26)  # Local file header.
