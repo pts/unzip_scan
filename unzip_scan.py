@@ -140,15 +140,23 @@ def scan_zip(f, do_extract=False, only_filenames=None):  # Extracts the .iso fro
     assert data[:4] == 'PK\3\4', repr(data)
     data = f.read(26)  # Local file header.
     assert len(data) == 26
-    # crc32 is of the uncompressed, decrypted file.
+    # crc32 is of the uncompressed, decrypted file. We ignore it.
     (version, flags, method, mtime_time, mtime_date, crc32, compressed_size,
      uncompressed_size, filename_size, extra_field_size,
     ) = struct.unpack('<HHHHHlLLHH', data)
     #print [version, flags, method, mtime_time, mtime_date, crc32, compressed_size, uncompressed_size, filename_size, extra_field_size]
+    assert method in (0, 8), method
     if flags & 8:  # Data descriptor comes after file contents.
-      assert crc32 == compressed_size == uncompressed_size == 0
-      crc32 = compressed_size = uncompressed_size = None
-      assert method == 8  # No other way to detect end of compressed data.
+      if method == 8:
+        assert crc32 == compressed_size == uncompressed_size == 0, (crc32, compressed_size, uncompressed_size, method)
+        crc32 = compressed_size = uncompressed_size = None
+      elif method == 0:
+        if uncompressed_size == 0:
+           uncompressed_size = compressed_size
+        assert crc32 == 0 and compressed_size == uncompressed_size, (crc32, compressed_size, uncompressed_size, method)
+        crc32 = None
+      else:
+        assert 0, method
     filename = f.read(filename_size)
     assert len(filename) == filename_size
     extra_field = f.read(extra_field_size)
@@ -216,7 +224,7 @@ def scan_zip(f, do_extract=False, only_filenames=None):  # Extracts the .iso fro
     # It's not info['codec'], because that would describe the contents of
     # the file (filename).
     info['method'] = METHODS[method]
-    if compressed_size is None:
+    if compressed_size is None or crc32 is None:
       has_printed = False
     else:
       has_printed = True
@@ -234,7 +242,6 @@ def scan_zip(f, do_extract=False, only_filenames=None):  # Extracts the .iso fro
     # !! Add efficient f.seek(..., 1) calls to skip bytes.
     uf = None
     #print [[filename, mtime, uncompressed_size]]
-    assert method in (0, 8)
     is_ok = False
     try:
       if do_extract and not is_dir and is_matching:
@@ -246,10 +253,10 @@ def scan_zip(f, do_extract=False, only_filenames=None):  # Extracts the .iso fro
         uf = open(filename, 'wb')
       else:
         uf = None
-      if flags & 8:
-        assert method == 8  # No other way to detect end of compressed data.
+      i = uci = 0
+      if compressed_size is None:
+        assert method == 8, method  # No other way to detect end of compressed data.
         zd = zlib.decompressobj(-15)
-        i = uci = 0
         while not zd.unused_data:
           data = f.read(65536)
           assert data  # !! Better report EOF (with partial filename.) Everywhere.
@@ -262,19 +269,15 @@ def scan_zip(f, do_extract=False, only_filenames=None):  # Extracts the .iso fro
           if uf:
             uf.write(data)
         if uf:
-          uf.write(zd.flush())
+          data = zd.flush()
+          uci += len(data)
+          if uf:
+            uf.write(data)
         unused_data = zd.unused_data
         i -= len(unused_data)
         f.unread(unused_data)
-        data = f.read(16)
-        assert len(data) == 16  # Data descriptor.
-        dd_signature, crc32, compressed_size, uncompressed_size = struct.unpack('<4slLL', data)
-        assert dd_signature == 'PK\x07\x08', [dd_signature]  # !! Missing (?) from some files.
-        assert i == compressed_size
-        assert uci == uncompressed_size
-        # !! Write to file.
       else:  # !! Test again.
-        # !! Don't extract when just viewing.
+        # !! Don't decompress with flag -l.
         if method == 8:
           zd = zlib.decompressobj(-15)  # !! Where to check CRC? Here and also in crc32 above?
         i = uci = 0
@@ -291,9 +294,22 @@ def scan_zip(f, do_extract=False, only_filenames=None):  # Extracts the .iso fro
           assert uci <= uncompressed_size
           if uf:
             uf.write(data)
-        assert uci == uncompressed_size
-        if uf and method == 8:
-          uf.write(zd.flush())
+        if method == 8:
+          data = zd.flush()
+          uci += len(data)
+          if uf:
+            uf.write(data)
+          assert not zd.unused_data
+      assert compressed_size is None or i == compressed_size, (i, compressed_size)
+      assert uncompressed_size is None or uci == uncompressed_size, (uci, uncompressed_size)
+      if flags & 8:
+        data = f.read(16)
+        assert len(data) == 16  # Data descriptor.
+        dd_signature, crc32, compressed_size, uncompressed_size = struct.unpack('<4slLL', data)
+        assert dd_signature == 'PK\x07\x08', [dd_signature]  # !! Missing (?) from some files.
+      assert i == compressed_size, (i, compressed_size)
+      assert uci == uncompressed_size, (uci, uncompressed_size)
+      assert crc32 is not None
       zd = None  # Save memory.
       is_ok = True
     finally:
