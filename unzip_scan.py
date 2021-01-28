@@ -1,8 +1,19 @@
-#! /usr/bin/python
-#
-# unzip_scan.py: Tool to extract and scan truncated ZIP files.
+#! /bin/sh
 # by pts@fazekas.hu at Sat Oct 27 11:54:15 CEST 2018
-#
+
+""":" # unzip_scan.py: extract and scan truncated ZIP files
+
+type python2.7 >/dev/null 2>&1 && exec python2.7 -- "$0" ${1+"$@"}
+type python2.6 >/dev/null 2>&1 && exec python2.6 -- "$0" ${1+"$@"}
+type python2.5 >/dev/null 2>&1 && exec python2.5 -- "$0" ${1+"$@"}
+type python2.4 >/dev/null 2>&1 && exec python2.4 -- "$0" ${1+"$@"}
+type python2   >/dev/null 2>&1 && exec python2   -- "$0" ${1+"$@"}
+exec python -- ${1+"$@"}; exit 1
+
+This script needs Python 2.4, 2.5, 2.6 or 2.7. Python 3.x won't work.
+
+Typical usage: cat myfile.zip | ./unzip_scan.py -t -
+"""
 
 import calendar
 import os
