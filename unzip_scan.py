@@ -282,12 +282,13 @@ def scan_zip(f, do_extract=False, only_filenames=None):  # Extracts the .iso fro
       else:
         uf = None
       i = uci = 0
+      is_trunc = False
       if compressed_size is None:
         assert method == 8, method  # No other way to detect end of compressed data.
         zd = zlib.decompressobj(-15)
         while not zd.unused_data:
           data = f.read(65536)
-          assert data  # !! Better report EOF (with partial filename.) Everywhere.
+          is_trunc = not data
           i += len(data)
           data = zd.decompress(data)
           if not data:  # !! Are we sure about EOF?
@@ -296,6 +297,8 @@ def scan_zip(f, do_extract=False, only_filenames=None):  # Extracts the .iso fro
           uci += len(data)
           if uf:
             uf.write(data)
+          if is_trunc:
+            break
         if uf:
           data = zd.flush()
           uci += len(data)
@@ -308,11 +311,10 @@ def scan_zip(f, do_extract=False, only_filenames=None):  # Extracts the .iso fro
         # !! Don't decompress with flag -l.
         if method == 8:
           zd = zlib.decompressobj(-15)  # !! Where to check CRC? Here and also in crc32 above?
-        i = uci = 0
         while i < compressed_size:
           j = min(65536, compressed_size - i)
           data = f.read(j)
-          assert len(data) == j
+          is_trunc = len(data) != j
           #print 'COMPRESSED_DATA size=%d %r' % (len(data), data)
           i += j
           if method == 8:
@@ -322,12 +324,17 @@ def scan_zip(f, do_extract=False, only_filenames=None):  # Extracts the .iso fro
           assert uci <= uncompressed_size
           if uf:
             uf.write(data)
+          if is_trunc:
+            break
         if method == 8:
           data = zd.flush()
           uci += len(data)
           if uf:
             uf.write(data)
-          assert not zd.unused_data
+          assert is_trunc or not zd.unused_data
+      # Even if the ZIP archive is truncated, we keep the partial, but
+      # longest possible member file on disk.
+      assert not is_trunc, 'ZIP archive truncated within member file: %r' % filename
       assert compressed_size is None or i == compressed_size, (i, compressed_size)
       assert uncompressed_size is None or uci == uncompressed_size, (uci, uncompressed_size)
       if flags & 8:
