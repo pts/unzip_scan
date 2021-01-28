@@ -115,6 +115,7 @@ def format_info(info):
   return ''.join(output)
 
 
+EXTRA_ZIP64 = 0x0001
 EXTRA_UPATH = 0x7075
 EXTRA_UNIX = 0x000d
 EXTRA_TIME = 0x5455
@@ -211,6 +212,9 @@ def scan_zip(f, do_extract=False, only_filenames=None):  # Extracts the .iso fro
           assert len(efe_data) >= fi + 4
           fi += 4
         assert fi == len(efe_data)
+      elif efe_id == EXTRA_ZIP64:
+        assert len(efe_data) >= 16
+        uncompressed_size, compressed_size = struct.unpack('<QQ', efe_data[:16])
 
     # Prevent overwriting global files for security.
     filename = filename.lstrip('/')
