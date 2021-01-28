@@ -182,6 +182,7 @@ def scan_zip(f, do_extract=False, only_filenames=None):  # Extracts the .iso fro
       i += 4
       assert i + efe_size <= extra_field_size
       efe_data = buffer(extra_field, i, efe_size)
+      assert len(efe_data) == efe_size
       i += efe_size
       #print 'EF 0x%x %d %r' % (efe_id, len(efe_data), str(efe_data))
       if efe_id == EXTRA_UPATH:  # Unicode (UTF-8) pathname.
@@ -192,12 +193,24 @@ def scan_zip(f, do_extract=False, only_filenames=None):  # Extracts the .iso fro
         assert len(efe_data) >= 8
         atime, mtime = struct.unpack('<LL', efe_data[:8])
       elif efe_id == EXTRA_TIME:
-        assert len(efe_data) >= 8
-        #assert efe_data[0] == '\x01'  # Version. Can be \x03 as well.
-        # This is GMT.
-        mtime, atime = struct.unpack('<LL', efe_data[1 : 9])
-        # At efe_data[9 : 13] on macOS the file creation time is also
-        # stored.
+        assert len(efe_data) >= 1, [efe_id, len(efe_size), str(efe_data)]
+        efe_flags, = struct.unpack('>B', efe_data[0])
+        assert not efe_flags & ~7
+        fi = 1
+        if efe_flags & 1:  # mtime (last modification time) in GMT.
+          assert len(efe_data) >= fi + 4
+          atime = mtime = struct.unpack('<L', efe_data[fi : fi + 4])[0]
+          fi += 4
+        if efe_flags & 2:  # atime (last access time) in GMT.
+          assert len(efe_data) >= fi + 4
+          atime, = struct.unpack('<L', efe_data[fi : fi + 4])
+          if not efe_flags & 1:
+            mtime = atime
+          fi += 4
+        if efe_flags & 4:  # crtime (creation time) in GMT, mostly on macOS.
+          assert len(efe_data) >= fi + 4
+          fi += 4
+        assert fi == len(efe_data)
 
     # Prevent overwriting global files for security.
     filename = filename.lstrip('/')
