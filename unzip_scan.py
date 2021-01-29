@@ -145,17 +145,23 @@ def scan_zip(f, do_extract=False, only_filenames=None):  # Extracts the .iso fro
     # !! Match and extract directories recursively.
     return only_filenames is None or filename in only_filenames
 
+  pre_data = ''
   while 1:
-    data = f.read(4)
+    if len(pre_data) < 8:
+      data = pre_data + f.read(8 - len(pre_data))
+    else:
+      assert len(pre_data) == 8
+      data = pre_data
+    pre_data = ''
     if data[:3] in ('PK\1', 'PK\5', 'PK\6', 'PK\7'):
       break
-    assert data[:4] == 'PK\3\4', repr(data)
-    data = f.read(26)  # Local file header.
-    assert len(data) == 26
+    assert data.startswith('PK\3\4') and len(data) >= 8, repr(data)
+    data += f.read(22)  # Local file header.
+    assert len(data) == 30
     # crc32 is of the uncompressed, decrypted file. We ignore it.
     (version, flags, method, mtime_time, mtime_date, crc32, compressed_size,
      uncompressed_size, filename_size, extra_field_size,
-    ) = struct.unpack('<HHHHHlLLHH', data)
+    ) = struct.unpack('<4xHHHHHlLLHH', data)
     #print [version, flags, method, mtime_time, mtime_date, crc32, compressed_size, uncompressed_size, filename_size, extra_field_size]
     assert method in (0, 8), method
     if flags & 8:  # Data descriptor comes after file contents.
@@ -187,6 +193,7 @@ def scan_zip(f, do_extract=False, only_filenames=None):  # Extracts the .iso fro
     # Extra field 0x7855 and 0x7875 have UID and GID, but not permissions.
     # Info-ZIP 3.0 zip(1) emits only extra fields 0x5455 and 0x7875.
 
+    is_zip64 = False
     i = 0
     while i < extra_field_size:
       assert i + 4 <= extra_field_size
@@ -226,6 +233,10 @@ def scan_zip(f, do_extract=False, only_filenames=None):  # Extracts the .iso fro
       elif efe_id == EXTRA_ZIP64:
         assert len(efe_data) >= 16
         uncompressed_size, compressed_size = struct.unpack('<QQ', efe_data[:16])
+        if uncompressed_size == 0 and method == 0:  # Shouldn't happen.
+          uncompressed_size = compressed_size
+        is_zip64 = True
+    assert method or compressed_size == uncompressed_size  # Both may be None.
 
     # Prevent overwriting global files for security.
     filename = filename.lstrip('/')
@@ -337,11 +348,20 @@ def scan_zip(f, do_extract=False, only_filenames=None):  # Extracts the .iso fro
       assert not is_trunc, 'ZIP archive truncated within member file: %r' % filename
       assert compressed_size is None or i == compressed_size, (i, compressed_size)
       assert uncompressed_size is None or uci == uncompressed_size, (uci, uncompressed_size)
-      if flags & 8:
-        data = f.read(16)
-        assert len(data) == 16  # Data descriptor.
-        dd_signature, crc32, compressed_size, uncompressed_size = struct.unpack('<4slLL', data)
+      if flags & 8:  # Data descriptor.
+        data = f.read(24)
+        assert len(data) == 24  # Actually, only 16 bytes in data descriptor, then 8 bytes in the next record.
+        dd_signature, crc32, compressed_size, uncompressed_size, uncompressed_size_64 = struct.unpack('<4slLLQ', data)
+        compressed_size_64, = struct.unpack('<8xQ8x', data)
         assert dd_signature == 'PK\x07\x08', [dd_signature]  # !! Missing (?) from some files.
+        if is_zip64 or (i == compressed_size_64 and uci == uncompressed_size_64):  # 8-byte sizes.
+          # For method == 0, the detection above is always correct. For
+          # method == 8, it may fail with probability 2.**-64.
+          compressed_size, uncompressed_size = compressed_size_64, uncompressed_size_64
+        elif i == compressed_size and uci == compressed_size:
+          pre_data = data[-8:]  # Unread the last 8 bytes.
+        else:
+          assert 0, 'Bad sizes in data descriptor: %r' % ((i, compressed_size, compressed_size_64, uci, uncompressed_size, uncompressed_size_64),)
       assert i == compressed_size, (i, compressed_size)
       assert uci == uncompressed_size, (uci, uncompressed_size)
       assert crc32 is not None
