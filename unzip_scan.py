@@ -126,6 +126,16 @@ def format_info(info):
   return ''.join(output)
 
 
+def does_file_exist(filename, size, mtime):
+  import stat
+  try:
+    st = os.stat(filename)
+  except OSError:
+    return False
+  return (stat.S_ISREG(st.st_mode) and st.st_size == size and
+          int(st.st_mtime) == int(mtime))
+
+
 EXTRA_ZIP64 = 0x0001
 EXTRA_UPATH = 0x7075
 EXTRA_UNIX = 0x000d
@@ -136,7 +146,8 @@ METHODS = {
     8: 'flate',
 }
 
-def scan_zip(f, do_extract=False, only_filenames=None):  # Extracts the .iso from the .zip on the fly.
+
+def scan_zip(f, do_extract=False, do_skip=False, only_filenames=None):  # Extracts the .iso from the .zip on the fly.
   # Based on: https://pkware.cachefly.net/webdocs/APPNOTE/APPNOTE-6.3.4.TXT (2014-10-01).
   # Based on (EXTRA_*): https://fossies.org/linux/unzip/proginfo/extrafld.txt (2008-07-17).
   # !! Support ZIP64.
@@ -283,7 +294,10 @@ def scan_zip(f, do_extract=False, only_filenames=None):  # Extracts the .iso fro
     #print [[filename, mtime, uncompressed_size]]
     is_ok = False
     try:
-      if do_extract and not is_dir and is_matching:
+      do_extract_this = do_extract and not is_dir and is_matching and not (
+          do_skip and uncompressed_size is not None and mtime is not None and
+          does_file_exist(filename, uncompressed_size, mtime))
+      if do_extract_this:
         ni = filename.rfind('/')
         if ni >= 0:
           dirname = filename[:ni]
@@ -332,6 +346,7 @@ def scan_zip(f, do_extract=False, only_filenames=None):  # Extracts the .iso fro
             data = zd.decompress(data)
           #print 'UNCOMPRESSED_DATA size=%d %r' % (len(data), data)
           uci += len(data)
+          #print 'UNCOMPRESSED_DATA size=%d total_size=%d' % (len(data), uci)
           assert uci <= uncompressed_size
           if uf:
             uf.write(data)
@@ -413,10 +428,13 @@ def main(argv):
         'There is NO WARRANTY. Use at your risk.\n'
         'Usage: %s [<flag> ...] <archive.zip> [<member-filename> ...]\n'
         'Flags:\n'
-        '-t Just test archive.zip, don\'t extract any files.\n' % argv[0])
+        '-t Just test archive.zip, don\'t extract any files.\n'
+        '-w Skip extracting a file if it exists with same size and mtime.\n'
+        % argv[0])
     sys.exit(1)
   i = 1
   do_extract = True
+  do_skip = False
   while i < len(argv):
     arg = argv[i]
     if not arg.startswith('-') or arg == '-':
@@ -426,6 +444,8 @@ def main(argv):
       break
     elif arg in ('-t', '-v'):
       do_extract = False
+    elif arg == '-w':  # Not an unzip(1) flag.
+      do_skip = True
     else:
       print >>sys.stderr, 'fatal: unknown flag: %s' % arg
       sys.exit(1)
@@ -441,12 +461,14 @@ def main(argv):
 
   if archive_filename == '-':
     scan_zip(UnreadableFile(sys.stdin),
-             do_extract=do_extract, only_filenames=only_filenames)
+             do_extract=do_extract, do_skip=do_skip,
+             only_filenames=only_filenames)
   else:
     f = open(archive_filename, 'rb')
     try:
       scan_zip(UnreadableFile(f),
-               do_extract=do_extract, only_filenames=only_filenames)
+               do_extract=do_extract, do_skip=do_skip,
+               only_filenames=only_filenames)
     finally:
       f.close()
 
