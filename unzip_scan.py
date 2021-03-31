@@ -26,12 +26,12 @@ import zlib
 class UnreadableFile(object):
   """A file-like object with .unread method to push bytes back."""
 
-  __slots__ = ('_f', '_unread', '_ui')
+  __slots__ = ('_f', '_sf', '_unread', '_ui')
 
   def __init__(self, f, header=None):
     if not callable(getattr(f, 'read', None)):
       raise TypeError
-    self._f = f
+    self._f = self._sf = f
     self._unread = ''
     self._ui = 0
     if header is not None:
@@ -62,14 +62,50 @@ class UnreadableFile(object):
       return result
     elif j == size:
       result = unread[ui:]
-      self._unread = ''
-      self._ui = 0
+      self._unread, self._ui = '', 0
       return result
     else:
       result = unread[ui:]
       self._unread = ''
       self._ui = 0
       return result + self._f.read(size - j)
+
+  def skip(self, size):
+    """Returns the actual number of bytes skipped."""
+    if size <= 0:
+      return 0
+    ui = self._ui
+    i = len(self._unread) - ui
+    if i:
+      if size < i:
+        self._ui = ui + size
+        return size
+      self._unread, self._ui = '', 0
+    sf = self._sf
+    if sf and i < size:  # Try to seek forward.
+      assert sf is self._f
+      try:
+        ofs = sf.tell()
+        ofs2 = ofs + (size - i)
+        sf.seek(0, 2)
+        # TODO(pts): Remember sf_size across calls.
+        sf_size = sf.tell()
+      except OSError:  # Maybe the file is not seekable.
+        ofs = ofs2 = sf_size = None
+        self._sf = None  # Mark file as unseekable, don't try seeking again.
+      if ofs2 is not None:
+        ofs3 = min(sf_size, ofs2)
+        sf.seek(ofs3, 0)
+        return ofs3 - ofs
+    f = self._f
+    while i < size:
+      j = min(65536, size - i)
+      data = f.read(j)
+      ld = len(data)
+      i += ld
+      if ld < j:
+        break
+    return i
 
 
 def convert_fat_gmt_to_timestamp(date_value, time_value):
@@ -147,10 +183,10 @@ METHODS = {
 }
 
 
-def scan_zip(f, do_extract=False, do_skip=False, only_filenames=None):  # Extracts the .iso from the .zip on the fly.
+def scan_zip(f, do_extract=False, do_skip=False, do_skipover=False,
+             only_filenames=None):
   # Based on: https://pkware.cachefly.net/webdocs/APPNOTE/APPNOTE-6.3.4.TXT (2014-10-01).
   # Based on (EXTRA_*): https://fossies.org/linux/unzip/proginfo/extrafld.txt (2008-07-17).
-  # !! Support ZIP64.
 
   def is_filename_matching(filename):
     # !! Match and extract directories recursively.
@@ -289,7 +325,6 @@ def scan_zip(f, do_extract=False, do_skip=False, only_filenames=None):  # Extrac
       print 'ENCRYPTION_HEADER %r' % data
       compressed_size -= 12
 
-    # !! Add efficient f.seek(..., 1) calls to skip bytes.
     uf = None
     #print [[filename, mtime, uncompressed_size]]
     is_ok = False
@@ -332,8 +367,7 @@ def scan_zip(f, do_extract=False, do_skip=False, only_filenames=None):  # Extrac
         unused_data = zd.unused_data
         i -= len(unused_data)
         f.unread(unused_data)
-      else:  # !! Test again.
-        # !! Don't decompress with flag -l.
+      elif uf or uncompressed_size is None or not do_skipover:  # !! Test again.
         if method == 8:
           zd = zlib.decompressobj(-15)  # !! Where to check CRC? Here and also in crc32 above?
         while i < compressed_size:
@@ -358,6 +392,13 @@ def scan_zip(f, do_extract=False, do_skip=False, only_filenames=None):  # Extrac
           if uf:
             uf.write(data)
           assert is_trunc or not zd.unused_data
+      else:  # Skip over compressed bytes quickly, without decompressing them.
+        assert compressed_size is not None
+        assert uncompressed_size is not None
+        assert not uf
+        i += f.skip(compressed_size)
+        uci += uncompressed_size
+        is_trunc = i != compressed_size
       # Even if the ZIP archive is truncated, we keep the partial, but
       # longest possible member file on disk.
       assert not is_trunc, 'ZIP archive truncated within member file: %r' % filename
@@ -428,13 +469,16 @@ def main(argv):
         'There is NO WARRANTY. Use at your risk.\n'
         'Usage: %s [<flag> ...] <archive.zip> [<member-filename> ...]\n'
         'Flags:\n'
-        '-t Just test archive.zip, don\'t extract any files.\n'
+        '-t|-v Just test archive.zip, don\'t extract any files.\n'
         '-w Skip extracting a file if it exists with same size and mtime.\n'
+        '-e Quickly skip (forward seek) over unneeded archive parts.\n'
+        '-l Same as -v -e.\n'
         % argv[0])
     sys.exit(1)
   i = 1
   do_extract = True
   do_skip = False
+  do_skipover = False
   while i < len(argv):
     arg = argv[i]
     if not arg.startswith('-') or arg == '-':
@@ -446,6 +490,10 @@ def main(argv):
       do_extract = False
     elif arg == '-w':  # Not an unzip(1) flag.
       do_skip = True
+    elif arg == '-e':  # Not an unzip(1) flag.
+      do_skipover = True
+    elif arg == '-l':
+      do_extract, do_skipover = False, True
     else:
       print >>sys.stderr, 'fatal: unknown flag: %s' % arg
       sys.exit(1)
@@ -460,17 +508,16 @@ def main(argv):
     only_filenames = argv[i:]
 
   if archive_filename == '-':
-    scan_zip(UnreadableFile(sys.stdin),
-             do_extract=do_extract, do_skip=do_skip,
-             only_filenames=only_filenames)
+    f, cf = sys.stdin, None
   else:
-    f = open(archive_filename, 'rb')
-    try:
-      scan_zip(UnreadableFile(f),
-               do_extract=do_extract, do_skip=do_skip,
-               only_filenames=only_filenames)
-    finally:
-      f.close()
+    cf = f = open(archive_filename, 'rb')
+  try:
+    scan_zip(UnreadableFile(f),
+             do_extract=do_extract, do_skip=do_skip, do_skipover=do_skipover,
+             only_filenames=only_filenames)
+  finally:
+    if cf:
+      cf.close()
 
 
 if __name__ == '__main__':
