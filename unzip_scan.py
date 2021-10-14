@@ -414,7 +414,7 @@ def scan_zip(f, do_extract=False, do_skip=False, do_skipover=False,
           # For method == 0, the detection above is always correct. For
           # method == 8, it may fail with probability 2.**-64.
           compressed_size, uncompressed_size = compressed_size_64, uncompressed_size_64
-        elif i == compressed_size and uci == compressed_size:
+        elif i == compressed_size and uci == uncompressed_size:
           pre_data = data[-8:]  # Unread the last 8 bytes.
         else:
           assert 0, 'Bad sizes in data descriptor: %r' % ((i, compressed_size, compressed_size_64, uci, uncompressed_size, uncompressed_size_64),)
