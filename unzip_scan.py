@@ -441,9 +441,15 @@ def scan_zip(f, do_extract=False, do_skip=False, do_skipover=False,
             print >>sys.stderr, 'warning: failed to rename partially extracted %r to %r' % (filename, filename2)
       uf = None  # Save memory.
     if is_dir:
-      assert crc32 == 0
-      assert compressed_size == 0
-      assert uncompressed_size == 0
+      assert crc32 == 0, (crc32, compressed_size, uncompressed_size)
+      assert uncompressed_size == 0, (crc32, compressed_size, uncompressed_size)
+      if method == 8:
+        # Some .zip files have 0 bytes uncompressed as 2 bytes compressed:
+        # cdata = '\3\0'; assert len(cdata) == 2; assert zlib.decompress(cdata, -15) == ''.
+        valid_compressed_sizes = (0, 2)
+      else:
+        valid_compressed_sizes = (0,)
+      assert compressed_size in valid_compressed_sizes, (crc32, compressed_size, uncompressed_size, valid_uncompressed_sizes)
     if do_extract and is_dir and is_filename_matching(filename):
       try:
         os.mkdir(filename)
