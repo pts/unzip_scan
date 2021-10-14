@@ -210,7 +210,7 @@ def scan_zip(f, do_extract=False, do_skip=False, do_skipover=False,
      uncompressed_size, filename_size, extra_field_size,
     ) = struct.unpack('<4xHHHHHlLLHH', data)
     #print [version, flags, method, mtime_time, mtime_date, crc32, compressed_size, uncompressed_size, filename_size, extra_field_size]
-    assert method in (0, 8), method
+    assert method in (0, 8), method  # See meanings in METHODS.
     if flags & 8:  # Data descriptor comes after file contents.
       if method == 8:
         assert crc32 == compressed_size == uncompressed_size == 0, (crc32, compressed_size, uncompressed_size, method)
@@ -351,9 +351,8 @@ def scan_zip(f, do_extract=False, do_skip=False, do_skipover=False,
           is_trunc = not data
           i += len(data)
           data = zd.decompress(data)
-          if not data:  # !! Are we sure about EOF?
+          if not data:
             break
-          # !! How many bytes remaining?
           uci += len(data)
           if uf:
             uf.write(data)
@@ -386,7 +385,7 @@ def scan_zip(f, do_extract=False, do_skip=False, do_skipover=False,
             uf.write(data)
           if is_trunc:
             break
-        if method == 8:
+        if method == 8:  # This also works with compressed_size == 0.
           data = zd.flush()
           uci += len(data)
           if uf:
