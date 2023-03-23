@@ -217,7 +217,7 @@ def scan_zip(f, do_extract=False, do_skip=False, do_skipover=False,
         crc32 = compressed_size = uncompressed_size = None
       elif method == 0:
         if uncompressed_size == 0:
-           uncompressed_size = compressed_size
+          uncompressed_size = compressed_size
         assert crc32 == 0 and compressed_size == uncompressed_size, (crc32, compressed_size, uncompressed_size, method)
         crc32 = None
       else:
