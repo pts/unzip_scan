@@ -213,8 +213,9 @@ def scan_zip(f, do_extract=False, do_skip=False, do_skipover=False,
     assert method in (0, 8), method  # See meanings in METHODS.
     if flags & 8:  # Data descriptor comes after file contents.
       if method == 8:
-        assert crc32 == compressed_size == uncompressed_size == 0, (crc32, compressed_size, uncompressed_size, method)
-        crc32 = compressed_size = uncompressed_size = None
+        # uncompressed_size may be nonzero.
+        assert crc32 == compressed_size == 0, (crc32, compressed_size, uncompressed_size, method)
+        crc32 = compressed_size = None
       elif method == 0:
         if uncompressed_size == 0:
           uncompressed_size = compressed_size
