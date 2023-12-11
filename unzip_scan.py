@@ -318,7 +318,7 @@ def scan_zip(f, do_skip_member=False, info=None,
       elif efe_id == EXTRA_TIME:
         assert len(efe_data) >= 1, [efe_id, len(efe_size), str(efe_data)]
         efe_flags, = struct.unpack('>B', efe_data[0])
-        assert not efe_flags & ~7, 'extra_time_flags: 0x%x' % efe_flags
+        assert not efe_flags & ~0x87, 'extra_time_flags: 0x%x' % efe_flags
         fi = 1
         if efe_flags & 1:  # mtime (last modification time) in GMT.
           assert len(efe_data) >= fi + 4, 'extra_field_size7'
@@ -333,7 +333,10 @@ def scan_zip(f, do_skip_member=False, info=None,
         if efe_flags & 4:  # crtime (creation time) in GMT, mostly on macOS.
           assert len(efe_data) >= fi + 4, 'extra_field_size9'
           fi += 4
-        assert fi == len(efe_data), 'extra_field_size10'
+        if efe_flags & 0x80:  # Unknown time field. ignored.  # TODO(pts): Mimic unzip(1) and 7z(1).
+          assert len(efe_data) >= fi + 4, 'extra_field_size9b'
+          fi += 4
+        assert fi == len(efe_data), 'extra_field_size10: (%d, %d)' % (fi, len(efe_data))
       elif efe_id == EXTRA_ZIP64:
         assert len(efe_data) >= 16, 'extra_field_size11'
         uncompressed_size, compressed_size = struct.unpack('<QQ', efe_data[:16])
