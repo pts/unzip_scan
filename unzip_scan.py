@@ -191,6 +191,7 @@ def scan_zip_maybe(f, do_all=False, **kwargs):
     return scan_zip(f=f, do_skip_member=False, **kwargs)
   buf_size = 8192
   data = ''
+  error_count = 0
   while 1:
     i = data.find('PK\3\4')  # Signature of local file header.
     if i < 0:
@@ -212,11 +213,11 @@ def scan_zip_maybe(f, do_all=False, **kwargs):
       #print (version, flags, method)
       f.unread(data[i:])
       data = ''
-      # TODO(pts): Skip over remaining uncompressed_size.
       info = {}
       try:
-        scan_zip(f=f, do_skip_member=True, info=info, **kwargs)
+        scan_zip(f=f, do_skip_member=True, info=info, **kwargs)  # May extract multiple member starting here.
       except (ValueError, AssertionError, zlib.error), e:
+        error_count += 1
         # Partially extracted file has been kept as *.partial.
         print >>sys.stderr, 'warning: %s.%s: %s' % (e.__class__.__module__, e.__class__.__name__, e)
         if not info.get('is_printed', None):
@@ -227,6 +228,9 @@ def scan_zip_maybe(f, do_all=False, **kwargs):
             info['error'] = 'error'
             sys.stdout.write(format_info(info))
             sys.stdout.flush()
+  if error_count:
+    print >>sys.stderr, 'fatal: failing because of %d member%s with errors' % (error_count, 's' * (error_count != 1))
+    sys.exit(1)
 
 
 def scan_zip(f, do_skip_member=False, info=None,
