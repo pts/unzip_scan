@@ -301,7 +301,7 @@ def scan_zip(f, do_skip_member=False, info=None,
     i = 0
     # !! TODO(pts): Populate `info' before these assertions.
     while i < extra_field_size:
-      assert i + 4 <= extra_field_size, 'extra_field_size2'
+      assert i + 4 <= extra_field_size, 'EOF in extra field size.'  # TODO(pts): Report `info' even if EOF in here.
       efe_id, efe_size = struct.unpack('<HH', extra_field[i : i + 4])
       i += 4
       assert i + efe_size <= extra_field_size, 'extra_field_size3'
