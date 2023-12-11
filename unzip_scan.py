@@ -175,7 +175,7 @@ def does_file_exist(filename, size, mtime):
 EXTRA_ZIP64 = 0x0001
 EXTRA_UPATH = 0x7075
 EXTRA_UNIX = 0x000d
-EXTRA_TIME = 0x5455
+EXTRA_TIME = 0x5455  # Extended timestamp.
 
 # The ZIP file format allows dozens of other compression methods, but we don't support them.
 METHODS = {
@@ -249,21 +249,21 @@ def scan_zip(f, do_skip_member=False, info=None,
     if len(pre_data) < 8:
       data = pre_data + f.read(8 - len(pre_data))
     else:
-      assert len(pre_data) == 8
+      assert len(pre_data) == 8, 'len_pre_data'
       data = pre_data
     pre_data = ''
     if data[:3] in ('PK\1', 'PK\5', 'PK\6', 'PK\7'):
       break
-    assert data.startswith('PK\3\4') and len(data) >= 8, repr(data)
+    assert data.startswith('PK\3\4') and len(data) >= 8, 'signature: %r' % (data,)
     data += f.read(22)  # Local file header.
-    assert len(data) == 30
+    assert len(data) == 30, 'local_file_header_size'
     # crc32 is of the uncompressed, decrypted file. We ignore it.
     (version, flags, method, mtime_time, mtime_date, crc32, compressed_size,
      uncompressed_size, filename_size, extra_field_size,
     ) = struct.unpack('<4xHHHHHlLLHH', data)
     #print [version, flags, method, mtime_time, mtime_date, crc32, compressed_size, uncompressed_size, filename_size, extra_field_size]
-    assert method in METHODS, method  # 0 and 8. See meanings in METHODS.
-    assert 1 <= version <= MAX_VERSION, version  # version = 10 * major + minor, see ``version needed to extract'' in https://pkware.cachefly.net/webdocs/casestudies/APPNOTE.TXT
+    assert method in METHODS, 'method: %d' % method  # 0 and 8. See meanings in METHODS.
+    assert 1 <= version <= MAX_VERSION, 'version: %d' % version  # version = 10 * major + minor, see ``version needed to extract'' in https://pkware.cachefly.net/webdocs/casestudies/APPNOTE.TXT
     if flags & 8:  # Data descriptor comes after file contents.
       if method == 8:
         # uncompressed_size may be nonzero.
@@ -277,11 +277,11 @@ def scan_zip(f, do_skip_member=False, info=None,
         assert crc32 == 0 and compressed_size == uncompressed_size, (crc32, compressed_size, uncompressed_size, method)
         crc32 = None
       else:
-        assert 0, method
+        assert 0, 'method in data descriptor: %d' % method
     filename = f.read(filename_size)
-    assert len(filename) == filename_size
+    assert len(filename) == filename_size, 'filename_size'
     extra_field = f.read(extra_field_size)
-    assert len(extra_field) == extra_field_size
+    assert len(extra_field) == extra_field_size, 'extra_field_size'
     # mtime_time is in local time, but we don't know the time zone, so we
     # assume GMT for simplicity. Thus we can be off by 24 hours.
     atime = mtime = convert_fat_gmt_to_timestamp(mtime_date, mtime_time)
@@ -298,56 +298,57 @@ def scan_zip(f, do_skip_member=False, info=None,
 
     is_zip64 = False
     i = 0
+    # !! TODO(pts): Populate `info' before these assertions.
     while i < extra_field_size:
-      assert i + 4 <= extra_field_size
+      assert i + 4 <= extra_field_size, 'extra_field_size2'
       efe_id, efe_size = struct.unpack('<HH', extra_field[i : i + 4])
       i += 4
-      assert i + efe_size <= extra_field_size
+      assert i + efe_size <= extra_field_size, 'extra_field_size3'
       efe_data = buffer(extra_field, i, efe_size)
-      assert len(efe_data) == efe_size
+      assert len(efe_data) == efe_size, 'extra_field_size4'
       i += efe_size
       #print 'EF 0x%x %d %r' % (efe_id, len(efe_data), str(efe_data))
       if efe_id == EXTRA_UPATH:  # Unicode (UTF-8) pathname.
-        assert len(efe_data) >= 6
-        assert efe_data[0] == '\x01'  # Version.
+        assert len(efe_data) >= 6, 'extra_field_size5'
+        assert efe_data[0] == '\x01', 'extra_field_version'  # Version.
         filename = efe_data[5:]  # UTF-8.
       elif efe_id == EXTRA_UNIX:
-        assert len(efe_data) >= 8
+        assert len(efe_data) >= 8, 'extra_field_size6'
         atime, mtime = struct.unpack('<LL', efe_data[:8])
       elif efe_id == EXTRA_TIME:
         assert len(efe_data) >= 1, [efe_id, len(efe_size), str(efe_data)]
         efe_flags, = struct.unpack('>B', efe_data[0])
-        assert not efe_flags & ~7
+        assert not efe_flags & ~7, 'extra_time_flags: 0x%x' % efe_flags
         fi = 1
         if efe_flags & 1:  # mtime (last modification time) in GMT.
-          assert len(efe_data) >= fi + 4
+          assert len(efe_data) >= fi + 4, 'extra_field_size7'
           atime = mtime = struct.unpack('<L', efe_data[fi : fi + 4])[0]
           fi += 4
         if efe_flags & 2:  # atime (last access time) in GMT.
-          assert len(efe_data) >= fi + 4
+          assert len(efe_data) >= fi + 4, 'extra_field_size8'
           atime, = struct.unpack('<L', efe_data[fi : fi + 4])
           if not efe_flags & 1:
             mtime = atime
           fi += 4
         if efe_flags & 4:  # crtime (creation time) in GMT, mostly on macOS.
-          assert len(efe_data) >= fi + 4
+          assert len(efe_data) >= fi + 4, 'extra_field_size9'
           fi += 4
-        assert fi == len(efe_data)
+        assert fi == len(efe_data), 'extra_field_size10'
       elif efe_id == EXTRA_ZIP64:
-        assert len(efe_data) >= 16
+        assert len(efe_data) >= 16, 'extra_field_size11'
         uncompressed_size, compressed_size = struct.unpack('<QQ', efe_data[:16])
         if uncompressed_size == 0 and method == 0:  # Shouldn't happen.
           uncompressed_size = compressed_size
         is_zip64 = True
-    assert method or compressed_size == uncompressed_size  # Both may be None.
+    assert method or compressed_size == uncompressed_size, 'method and sizes'  # Both may be None.
 
     # Prevent overwriting global files for security.
     filename = filename.lstrip('/')
     is_dir = filename.endswith('/')  # Info-ZIP.
     if is_dir:
-      assert crc32 in (0, None)
-      assert compressed_size in (0, None)
-      assert uncompressed_size in (0, None)
+      assert crc32 in (0, None), 'dir_crc32'
+      assert compressed_size in (0, None), 'dir_compressed_size'
+      assert uncompressed_size in (0, None), 'dir_uncompresed_size'
     is_matching = is_filename_matching(filename)
     if orig_info is None:
       info = {}
@@ -380,9 +381,9 @@ def scan_zip(f, do_skip_member=False, info=None,
         info['is_printed'] = True
 
     if flags & 1:  # Encryption header.
-      assert compressed_size >= 12
+      assert compressed_size >= 12, 'encryption_header_size'
       data = f.read(12)
-      assert len(data) == 12
+      assert len(data) == 12, 'encryption_header_size2'
       print >>sys.stderr, 'info: ENCRYPTION_HEADER %r' % data
       compressed_size -= 12
 
@@ -405,7 +406,7 @@ def scan_zip(f, do_skip_member=False, info=None,
       i = uci = 0
       is_trunc = False
       if compressed_size is None:
-        assert method == 8, method  # No other way to detect end of compressed data.
+        assert method == 8, 'method_unknown_compressed_size: %d' % method  # No other way to detect end of compressed data.
         zd = zlib.decompressobj(-15)
         while not zd.unused_data:
           data = f.read(65536)
@@ -455,7 +456,7 @@ def scan_zip(f, do_skip_member=False, info=None,
           #print 'UNCOMPRESSED_DATA size=%d %r' % (len(data), data)
           uci += len(data)
           #print 'UNCOMPRESSED_DATA size=%d total_size=%d' % (len(data), uci)
-          assert uci <= uncompressed_size
+          assert uci <= uncompressed_size, 'uci_uncompressed_size'
           if uf:
             uf.write(data)
           if is_trunc:
@@ -465,11 +466,11 @@ def scan_zip(f, do_skip_member=False, info=None,
           uci += len(data)
           if uf:
             uf.write(data)
-          assert is_trunc or not zd.unused_data
+          assert is_trunc or not zd.unused_data, 'is_trunc_unused_data'
       else:  # Skip over compressed bytes quickly, without decompressing them.
-        assert compressed_size is not None
-        assert uncompressed_size is not None
-        assert not uf
+        assert compressed_size is not None, 'compressed_size_is_not_none'
+        assert uncompressed_size is not None, 'uncompressed_size_is_not_none'
+        assert not uf, 'uf'
         i += f.skip(compressed_size)
         uci += uncompressed_size
         is_trunc = i != compressed_size
@@ -480,7 +481,7 @@ def scan_zip(f, do_skip_member=False, info=None,
       assert uncompressed_size is None or uci == uncompressed_size, (uci, uncompressed_size)
       if flags & 8:  # Data descriptor.
         data = f.read(24)
-        assert len(data) == 24  # Actually, only 16 bytes in data descriptor, then 8 bytes in the next record.
+        assert len(data) == 24, 'data_descriptor_size'  # Actually, only 16 bytes in data descriptor, then 8 bytes in the next record.
         dd_signature, crc32, compressed_size, uncompressed_size, uncompressed_size_64 = struct.unpack('<4slLLQ', data)
         if not is_dir:
           info['size'] = uncompressed_size
@@ -496,9 +497,9 @@ def scan_zip(f, do_skip_member=False, info=None,
           pre_data = data[-8:]  # Unread the last 8 bytes.
         else:
           assert 0, 'Bad sizes in data descriptor: %r' % ((i, compressed_size, compressed_size_64, uci, uncompressed_size, uncompressed_size_64),)
-      assert i == compressed_size, (i, compressed_size)
-      assert uci == uncompressed_size, (uci, uncompressed_size)
-      assert crc32 is not None
+      assert i == compressed_size, 'i_compressed_size: (%r, %r)' % (i, compressed_size)
+      assert uci == uncompressed_size, 'uci_uncompressed_size: (%r, %r)' % (uci, uncompressed_size)
+      assert crc32 is not None, 'crc32'
       zd = None  # Save memory.
       is_ok = True
     finally:
@@ -537,7 +538,7 @@ def scan_zip(f, do_skip_member=False, info=None,
           raise
       os.utime(filename, (atime, mtime))
     if is_matching and not has_printed:
-      # !! Print something earlier, even if asserts fail.
+      # !! Print something earlier, even if asserts fail. `-a' does it.
       sys.stdout.write(format_info(info))
       sys.stdout.flush()
       info['is_printed'] = True
