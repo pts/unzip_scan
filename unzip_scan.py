@@ -404,6 +404,7 @@ def scan_zip(f, do_skip_member=False, info=None,
           dirname = filename[:ni]
           if not os.path.isdir(dirname):
             os.makedirs(dirname)
+        # TODO(pts): Convert ISO-8859-1 to UTF-8 upon error: IOError: [Errno 84] Invalid or incomplete multibyte or wide character: 'x\x81y.xls'
         uf = open(filename, 'wb')
       else:
         uf = None
