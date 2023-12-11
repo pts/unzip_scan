@@ -177,13 +177,60 @@ EXTRA_UPATH = 0x7075
 EXTRA_UNIX = 0x000d
 EXTRA_TIME = 0x5455
 
+# The ZIP file format allows dozens of other compression methods, but we don't support them.
 METHODS = {
     0: 'uncompressed',
     8: 'flate',
 }
 
+MAX_VERSION = 99  # On 2023-12-11, it's 63 in https://pkware.cachefly.net/webdocs/casestudies/APPNOTE.TXT
 
-def scan_zip(f, do_extract=False, do_skip=False, do_skipover=False,
+
+def scan_zip_maybe(f, do_all=False, **kwargs):
+  if not do_all:
+    return scan_zip(f=f, do_skip_member=False, **kwargs)
+  buf_size = 8192
+  data = ''
+  while 1:
+    i = data.find('PK\3\4')  # Signature of local file header.
+    if i < 0:
+      data = f.read(buf_size)
+      if not data:
+        break
+    elif i + 10 > len(data):
+      f.unread(len(data) - i)
+      data2 = f.read(buf_size)
+      if not data2:
+        break
+      data += data2
+      data2 = None  # Save memory.
+    else:
+      version, flags, method = struct.unpack('<HHH', data[i + 4 : i + 10])  # First 3 fields of local file header after the signature.
+      if not (method in METHODS and 1 <= version <= MAX_VERSION):
+        data = data[i + 4:]  # TODO(pts): Avoid long string copies.
+        continue
+      #print (version, flags, method)
+      f.unread(data[i:])
+      data = ''
+      # TODO(pts): Skip over remaining uncompressed_size.
+      info = {}
+      try:
+        scan_zip(f=f, do_skip_member=True, info=info, **kwargs)
+      except (ValueError, AssertionError, zlib.error), e:
+        # Partially extracted file has been kept as *.partial.
+        print >>sys.stderr, 'warning: %s.%s: %s' % (e.__class__.__module__, e.__class__.__name__, e)
+        if not info.get('is_printed', None):
+          for k, v in sorted(info.iteritems()):
+            if v is None:
+              del info[k]
+          if info:
+            info['error'] = 'error'
+            sys.stdout.write(format_info(info))
+            sys.stdout.flush()
+
+
+def scan_zip(f, do_skip_member=False, info=None,
+             do_extract=False, do_skip=False, do_skipover=False,
              only_filenames=None):
   # Based on: https://pkware.cachefly.net/webdocs/APPNOTE/APPNOTE-6.3.4.TXT (2014-10-01).
   # Based on (EXTRA_*): https://fossies.org/linux/unzip/proginfo/extrafld.txt (2008-07-17).
@@ -193,6 +240,7 @@ def scan_zip(f, do_extract=False, do_skip=False, do_skipover=False,
     return only_filenames is None or filename in only_filenames
 
   pre_data = ''
+  orig_info = info
   while 1:
     if len(pre_data) < 8:
       data = pre_data + f.read(8 - len(pre_data))
@@ -210,7 +258,8 @@ def scan_zip(f, do_extract=False, do_skip=False, do_skipover=False,
      uncompressed_size, filename_size, extra_field_size,
     ) = struct.unpack('<4xHHHHHlLLHH', data)
     #print [version, flags, method, mtime_time, mtime_date, crc32, compressed_size, uncompressed_size, filename_size, extra_field_size]
-    assert method in (0, 8), method  # See meanings in METHODS.
+    assert method in METHODS, method  # 0 and 8. See meanings in METHODS.
+    assert 1 <= version <= MAX_VERSION, version  # version = 10 * major + minor, see ``version needed to extract'' in https://pkware.cachefly.net/webdocs/casestudies/APPNOTE.TXT
     if flags & 8:  # Data descriptor comes after file contents.
       if method == 8:
         # uncompressed_size may be nonzero.
@@ -296,7 +345,11 @@ def scan_zip(f, do_extract=False, do_skip=False, do_skipover=False,
       assert compressed_size in (0, None)
       assert uncompressed_size in (0, None)
     is_matching = is_filename_matching(filename)
-    info = {}
+    if orig_info is None:
+      info = {}
+    else:
+      info = orig_info
+      info.clear()
     info['f'] = filename.rstrip('/')
     if is_dir:
       info['is_dir'] = 1
@@ -313,19 +366,20 @@ def scan_zip(f, do_extract=False, do_skip=False, do_skipover=False,
     # It's not info['codec'], because that would describe the contents of
     # the file (filename).
     info['method'] = METHODS[method]
-    if compressed_size is None or crc32 is None:
+    if compressed_size is None or crc32 is None or orig_info is None:
       has_printed = False
     else:
       has_printed = True
       if is_matching:
         sys.stdout.write(format_info(info))
         sys.stdout.flush()
+        info['is_printed'] = True
 
     if flags & 1:  # Encryption header.
       assert compressed_size >= 12
       data = f.read(12)
       assert len(data) == 12
-      print 'ENCRYPTION_HEADER %r' % data
+      print >>sys.stderr, 'info: ENCRYPTION_HEADER %r' % data
       compressed_size -= 12
 
     uf = None
@@ -353,7 +407,14 @@ def scan_zip(f, do_extract=False, do_skip=False, do_skipover=False,
           data = f.read(65536)
           is_trunc = not data
           i += len(data)
-          data = zd.decompress(data)
+          if do_skip_member:
+            try:
+              data = zd.decompress(data)
+            except zlib.error:
+              f.unread(zd.unused_data)
+              raise
+          else:
+            data = zd.decompress(data)
           if not data:
             break
           uci += len(data)
@@ -379,7 +440,14 @@ def scan_zip(f, do_extract=False, do_skip=False, do_skipover=False,
           #print 'COMPRESSED_DATA size=%d %r' % (len(data), data)
           i += j
           if method == 8:
-            data = zd.decompress(data)
+            if do_skip_member:
+              try:
+                data = zd.decompress(data)
+              except zlib.error:
+                f.skip(compressed_size - i)
+                raise
+            else:
+              data = zd.decompress(data)
           #print 'UNCOMPRESSED_DATA size=%d %r' % (len(data), data)
           uci += len(data)
           #print 'UNCOMPRESSED_DATA size=%d total_size=%d' % (len(data), uci)
@@ -410,6 +478,10 @@ def scan_zip(f, do_extract=False, do_skip=False, do_skipover=False,
         data = f.read(24)
         assert len(data) == 24  # Actually, only 16 bytes in data descriptor, then 8 bytes in the next record.
         dd_signature, crc32, compressed_size, uncompressed_size, uncompressed_size_64 = struct.unpack('<4slLLQ', data)
+        if not is_dir:
+          info['size'] = uncompressed_size
+        info['compressed_size'] = compressed_size
+        info['crc32'] = crc32
         compressed_size_64, = struct.unpack('<8xQ8x', data)
         assert dd_signature == 'PK\x07\x08', [dd_signature]  # !! Missing (?) from some files.
         if is_zip64 or (i == compressed_size_64 and uci == uncompressed_size_64):  # 8-byte sizes.
@@ -461,13 +533,10 @@ def scan_zip(f, do_extract=False, do_skip=False, do_skipover=False,
           raise
       os.utime(filename, (atime, mtime))
     if is_matching and not has_printed:
-      if not is_dir:
-        info['size'] = uncompressed_size
-      info['compressed_size'] = compressed_size
-      info['crc32'] = crc32
       # !! Print something earlier, even if asserts fail.
       sys.stdout.write(format_info(info))
       sys.stdout.flush()
+      info['is_printed'] = True
 
 
 def main(argv):
@@ -480,7 +549,8 @@ def main(argv):
         'Flags:\n'
         '-t|-v Just test archive.zip, don\'t extract any files.\n'
         '-w Skip extracting a file if it exists with same size and mtime.\n'
-        '-e Quickly skip (forward seek) over unneeded archive parts.\n'
+        '-e Quickly skip (forward seek) over unneeded archive members.\n'
+        '-a Optimistically find all archive members, ignoring errors.\n'
         '-l Same as -v -e.\n'
         % argv[0])
     sys.exit(1)
@@ -488,6 +558,7 @@ def main(argv):
   do_extract = True
   do_skip = False
   do_skipover = False
+  do_all = False
   while i < len(argv):
     arg = argv[i]
     if not arg.startswith('-') or arg == '-':
@@ -503,6 +574,8 @@ def main(argv):
       do_skipover = True
     elif arg == '-l':
       do_extract, do_skipover = False, True
+    elif arg == '-a':
+      do_all = True
     else:
       print >>sys.stderr, 'fatal: unknown flag: %s' % arg
       sys.exit(1)
@@ -521,7 +594,8 @@ def main(argv):
   else:
     cf = f = open(archive_filename, 'rb')
   try:
-    scan_zip(UnreadableFile(f),
+    scan_zip_maybe(
+             f=UnreadableFile(f), do_all=do_all,
              do_extract=do_extract, do_skip=do_skip, do_skipover=do_skipover,
              only_filenames=only_filenames)
   finally:
