@@ -254,6 +254,7 @@ def scan_zip(f, do_skip_member=False, info=None,
     pre_data = ''
     if data[:3] in ('PK\1', 'PK\5', 'PK\6', 'PK\7'):
       break
+    assert data, 'ZIP header expected, got EOF.'  # Even after the last local file header, EOF is not OK, there should be central directory header and end of central directory header.
     assert data.startswith('PK\3\4') and len(data) >= 8, 'signature: %r' % (data,)
     data += f.read(22)  # Local file header.
     assert len(data) == 30, 'local_file_header_size'
