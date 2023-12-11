@@ -456,6 +456,7 @@ def scan_zip(f, do_extract=False, do_skip=False, do_skipover=False,
       try:
         os.mkdir(filename)
       except OSError:
+        os.makedirs(filename)
         if not os.path.isdir(filename):
           raise
       os.utime(filename, (atime, mtime))
