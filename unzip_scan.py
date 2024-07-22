@@ -346,8 +346,11 @@ def scan_zip(f, do_skip_member=False, info=None,
       elif efe_id == EXTRA_ZIP64:
         assert len(efe_data) >= 16, 'extra_field_size11'
         uncompressed_size, compressed_size = struct.unpack('<QQ', efe_data[:16])
-        if uncompressed_size == 0 and method == 0:  # Shouldn't happen.
-          uncompressed_size = compressed_size
+        if compressed_size == uncompressed_size == 0:
+          compressed_size = uncompressed_size = None
+        else:
+          if uncompressed_size == 0 and method == 0:  # Shouldn't happen.
+            uncompressed_size = compressed_size
         is_zip64 = True
     assert method or compressed_size == uncompressed_size, 'method and sizes'  # Both may be None.
 
@@ -498,7 +501,7 @@ def scan_zip(f, do_skip_member=False, info=None,
         info['compressed_size'] = compressed_size
         info['crc32'] = crc32
         compressed_size_64, = struct.unpack('<8xQ8x', data)
-        assert dd_signature == 'PK\x07\x08', [dd_signature]  # !! Missing (?) from some files.
+        assert dd_signature == 'PK\x07\x08', [dd_signature, crc32, compressed_size, uncompressed_size]  # !! Missing (?) from some files.
         if is_zip64 or (i == compressed_size_64 and uci == uncompressed_size_64):  # 8-byte sizes.
           # For method == 0, the detection above is always correct. For
           # method == 8, it may fail with probability 2.**-64.
