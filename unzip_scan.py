@@ -267,11 +267,16 @@ def scan_zip(f, do_skip_member=False, info=None,
     assert 1 <= version <= MAX_VERSION, 'version: %d' % version  # version = 10 * major + minor, see ``version needed to extract'' in https://pkware.cachefly.net/webdocs/casestudies/APPNOTE.TXT
     if flags & 8:  # Data descriptor comes after file contents.
       if method == 8:
-        # uncompressed_size may be nonzero.
-        assert crc32 == compressed_size == 0, (crc32, compressed_size, uncompressed_size, method)
-        crc32 = compressed_size = None
-        if uncompressed_size == 0:
-          uncompressed_size = None
+        assert crc32 == 0, (crc32, compressed_size, uncompressed_size, method)
+        crc32 = None
+        if compressed_size == uncompressed_size == 0xffffffff:
+          compressed_size = uncompressed_size = None
+        else:
+          # uncompressed_size may be nonzero.
+          assert compressed_size == 0, (crc32, compressed_size, uncompressed_size, method)
+          compressed_size = None
+          if uncompressed_size == 0:
+            uncompressed_size = None
       elif method == 0:
         if uncompressed_size == 0:
           uncompressed_size = compressed_size
